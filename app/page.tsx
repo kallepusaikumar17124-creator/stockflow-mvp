@@ -1,47 +1,40 @@
 ﻿"use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Boxes,
-  Plus,
-  AlertTriangle,
-  Package,
-  TrendingDown,
-  LogOut,
-  Search,
-  CheckCircle2,
-} from "lucide-react";
 
 interface Product {
   id: string;
   name: string;
   sku: string;
-  description: string | null;
-  quantityOnHand: number;
-  costPrice: number | null;
-  sellingPrice: number | null;
-  lowStockThreshold: number | null;
-  createdAt: string;
+  category: string;
+  currentStock: number;
+  costPrice: number;
+  sellingPrice: number;
+  lowStockThreshold: number;
 }
 
-export default function Dashboard() {
+export default function DashboardPage() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
-  const [defaultThreshold, setDefaultThreshold] = useState(5);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState<"products" | "settings">("products");
 
-  const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
-  const [description, setDescription] = useState("");
-  const [quantity, setQuantity] = useState<number | string>(0);
-  const [costPrice, setCostPrice] = useState<number | string>("");
-  const [sellingPrice, setSellingPrice] = useState<number | string>("");
-  const [lowStockThreshold, setLowStockThreshold] = useState<number | string>("");
-  const [formError, setFormError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  // Edit Modal State
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+  // New Product Modal State
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    sku: "",
+    category: "General",
+    currentStock: 0,
+    costPrice: 0,
+    sellingPrice: 0,
+    lowStockThreshold: 10,
+  });
 
   const fetchProducts = async () => {
     try {
@@ -52,7 +45,6 @@ export default function Dashboard() {
       }
       const data = await res.json();
       setProducts(data.products || []);
-      setDefaultThreshold(data.defaultThreshold || 5);
     } catch (err) {
       console.error(err);
     } finally {
@@ -69,294 +61,474 @@ export default function Dashboard() {
     router.push("/login");
   };
 
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError("");
-    setSubmitting(true);
+  // Generate Sample Products
+  const handleAutoGenerate = async () => {
+    setLoading(true);
+    await fetch("/api/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "auto-generate" }),
+    });
+    await fetchProducts();
+  };
 
-    try {
-      const res = await fetch("/api/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          sku,
-          description,
-          quantityOnHand: quantity,
-          costPrice,
-          sellingPrice,
-          lowStockThreshold,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create product");
-
-      setIsModalOpen(false);
-      setName("");
-      setSku("");
-      setDescription("");
-      setQuantity(0);
-      setCostPrice("");
-      setSellingPrice("");
-      setLowStockThreshold("");
-      fetchProducts();
-    } catch (err: any) {
-      setFormError(err.message);
-    } finally {
-      setSubmitting(false);
+  // Delete Product
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this product?")) return;
+    const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setProducts(products.filter((p) => p.id !== id));
+    } else {
+      alert("Failed to delete product.");
     }
   };
 
-  const totalProducts = products.length;
-  const totalStockUnits = useMemo(
-    () => products.reduce((acc, p) => acc + p.quantityOnHand, 0),
-    [products]
-  );
-  const lowStockItems = useMemo(
-    () =>
-      products.filter(
-        (p) => p.quantityOnHand <= (p.lowStockThreshold ?? defaultThreshold)
-      ),
-    [products, defaultThreshold]
-  );
+  // Save Edit (Modal)
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
 
-  const filteredProducts = useMemo(() => {
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.sku.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [products, search]);
+    const res = await fetch(`/api/products/${editingProduct.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editingProduct),
+    });
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
-        Loading inventory...
-      </div>
-    );
-  }
+    if (res.ok) {
+      setEditingProduct(null);
+      fetchProducts();
+    } else {
+      alert("Error updating product");
+    }
+  };
+
+  // Create Product
+  const handleCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch("/api/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+
+    if (res.ok) {
+      setIsAddOpen(false);
+      setFormData({
+        name: "",
+        sku: "",
+        category: "General",
+        currentStock: 0,
+        costPrice: 0,
+        sellingPrice: 0,
+        lowStockThreshold: 10,
+      });
+      fetchProducts();
+    } else {
+      const err = await res.json();
+      alert(err.error || "Failed to create product");
+    }
+  };
+
+  const filteredProducts = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.category.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur px-6 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-600/10 border border-blue-500/20 rounded-lg">
-            <Boxes className="w-5 h-5 text-blue-500" />
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Top Main Menu Navigation Bar */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg">
+                S
+              </div>
+              <span className="font-bold text-xl text-slate-800">StockFlow</span>
+            </div>
+
+            {/* Navigation Tabs */}
+            <nav className="flex space-x-2">
+              <button
+                onClick={() => setActiveTab("products")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                  activeTab === "products"
+                    ? "bg-indigo-50 text-indigo-700 font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Products
+              </button>
+              <button
+                onClick={() => setActiveTab("settings")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                  activeTab === "settings"
+                    ? "bg-indigo-50 text-indigo-700 font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Settings
+              </button>
+            </nav>
           </div>
-          <span className="font-bold text-lg tracking-tight">StockFlow</span>
+
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+              ● Active Org
+            </span>
+            <button
+              onClick={handleLogout}
+              className="text-sm font-medium text-slate-600 hover:text-red-600 px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 transition"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 text-sm text-slate-400 hover:text-white px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-800 transition"
-        >
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </button>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-4">
-            <div className="p-3 bg-blue-500/10 text-blue-400 rounded-lg">
-              <Package className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Unique SKUs</p>
-              <h3 className="text-2xl font-bold">{totalProducts}</h3>
-            </div>
-          </div>
-
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-4">
-            <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-lg">
-              <CheckCircle2 className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Total Inventory Units</p>
-              <h3 className="text-2xl font-bold">{totalStockUnits}</h3>
-            </div>
-          </div>
-
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-4">
-            <div className="p-3 bg-amber-500/10 text-amber-400 rounded-lg">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Low Stock Alerts</p>
-              <h3 className="text-2xl font-bold text-amber-400">{lowStockItems.length}</h3>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="relative w-full sm:w-80">
-            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search products or SKU..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition"
-          >
-            <Plus className="w-4 h-4" /> Add Product
-          </button>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-4">Product Name</th>
-                  <th className="py-3 px-4">SKU</th>
-                  <th className="py-3 px-4">Stock Level</th>
-                  <th className="py-3 px-4">Cost</th>
-                  <th className="py-3 px-4">Selling</th>
-                  <th className="py-3 px-4">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {filteredProducts.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500">
-                      No products found. Add your first inventory item to get started!
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProducts.map((p) => {
-                    const threshold = p.lowStockThreshold ?? defaultThreshold;
-                    const isLow = p.quantityOnHand <= threshold;
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-3 px-4 font-medium text-white">{p.name}</td>
-                        <td className="py-3 px-4 font-mono text-xs text-slate-400">{p.sku}</td>
-                        <td className="py-3 px-4">{p.quantityOnHand} units</td>
-                        <td className="py-3 px-4 text-slate-400">
-                          {p.costPrice !== null ? `$${p.costPrice.toFixed(2)}` : "-"}
-                        </td>
-                        <td className="py-3 px-4 text-slate-200">
-                          {p.sellingPrice !== null ? `$${p.sellingPrice.toFixed(2)}` : "-"}
-                        </td>
-                        <td className="py-3 px-4">
-                          {isLow ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                              <TrendingDown className="w-3 h-3" /> Low Stock
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              Optimal
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
-
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-white">Create New Product</h2>
-
-            {formError && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleAddProduct} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">SKU (Unique) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {activeTab === "settings" ? (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-2xl">
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Organization Settings</h2>
+            <p className="text-sm text-slate-500 mb-6">Manage global default alert preferences and configuration.</p>
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Quantity On Hand</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Default Low Stock Threshold</label>
                 <input
                   type="number"
-                  min="0"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+                  defaultValue={10}
+                  className="w-full px-3 py-2 border rounded-md text-slate-900 border-slate-300 focus:ring-2 focus:ring-indigo-500"
                 />
+              </div>
+              <button
+                onClick={() => alert("Settings saved")}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition"
+              >
+                Save Preferences
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Header Actions */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900">Inventory Dashboard</h1>
+                <p className="text-sm text-slate-500">Track and manage inventory items across your organization.</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handleAutoGenerate}
+                  className="px-4 py-2 bg-slate-100 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition"
+                >
+                  ⚡ Auto-Generate Products
+                </button>
+                <button
+                  onClick={() => setIsAddOpen(true)}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-sm transition"
+                >
+                  + Add Product
+                </button>
+              </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className="mb-6">
+              <input
+                type="text"
+                placeholder="Search by product name, SKU, or category..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:max-w-md px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900"
+              />
+            </div>
+
+            {/* Clean Table View */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 border-b border-slate-200 text-xs font-semibold uppercase tracking-wider text-slate-600">
+                      <th className="py-3.5 px-4">Product Name</th>
+                      <th className="py-3.5 px-4">SKU</th>
+                      <th className="py-3.5 px-4">Category</th>
+                      <th className="py-3.5 px-4 text-center">Stock</th>
+                      <th className="py-3.5 px-4 text-right">Cost Price</th>
+                      <th className="py-3.5 px-4 text-right">Selling Price</th>
+                      <th className="py-3.5 px-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {loading ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                          Loading products...
+                        </td>
+                      </tr>
+                    ) : filteredProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-500">
+                          No products found. Click <strong>Auto-Generate Products</strong> or <strong>Add Product</strong> above.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredProducts.map((p) => {
+                        const isLowStock = p.currentStock <= p.lowStockThreshold;
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-50/70 transition">
+                            <td className="py-3 px-4 font-medium text-slate-900">{p.name}</td>
+                            <td className="py-3 px-4 font-mono text-xs text-slate-500">{p.sku}</td>
+                            <td className="py-3 px-4 text-slate-600">
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700">
+                                {p.category}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                  isLowStock
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-emerald-100 text-emerald-800"
+                                }`}
+                              >
+                                {p.currentStock} units
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right text-slate-700">₹{p.costPrice.toFixed(2)}</td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-900">₹{p.sellingPrice.toFixed(2)}</td>
+                            <td className="py-3 px-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => setEditingProduct(p)}
+                                  className="px-2.5 py-1 text-xs font-medium bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(p.id)}
+                                  className="px-2.5 py-1 text-xs font-medium bg-red-50 text-red-600 rounded hover:bg-red-100 transition"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* EDIT MODAL POPUP */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">Edit Product</h3>
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4 pt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase">Product Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingProduct.name}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">SKU</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingProduct.sku}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, sku: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Category</label>
+                  <input
+                    type="text"
+                    value={editingProduct.category}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Cost Price</label>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Stock Qty</label>
                   <input
                     type="number"
-                    step="0.01"
-                    value={costPrice}
-                    onChange={(e) => setCostPrice(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+                    value={editingProduct.currentStock}
+                    onChange={(e) =>
+                      setEditingProduct({ ...editingProduct, currentStock: Number(e.target.value) })
+                    }
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Selling Price</label>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Cost Price</label>
                   <input
                     type="number"
                     step="0.01"
-                    value={sellingPrice}
-                    onChange={(e) => setSellingPrice(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+                    value={editingProduct.costPrice}
+                    onChange={(e) =>
+                      setEditingProduct({ ...editingProduct, costPrice: Number(e.target.value) })
+                    }
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Low Threshold</label>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Selling Price</label>
                   <input
                     type="number"
-                    placeholder="Default: 5"
-                    value={lowStockThreshold}
-                    onChange={(e) => setLowStockThreshold(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-blue-500"
+                    step="0.01"
+                    value={editingProduct.sellingPrice}
+                    onChange={(e) =>
+                      setEditingProduct({ ...editingProduct, sellingPrice: Number(e.target.value) })
+                    }
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white transition"
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm rounded-lg transition"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition"
                 >
-                  {submitting ? "Saving..." : "Add to Catalog"}
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD PRODUCT MODAL POPUP */}
+      {isAddOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">Add New Product</h3>
+              <button
+                onClick={() => setIsAddOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="space-y-4 pt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase">Product Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Ergonomic Office Chair"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">SKU</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CHR-001"
+                    value={formData.sku}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Category</label>
+                  <input
+                    type="text"
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Initial Stock</label>
+                  <input
+                    type="number"
+                    value={formData.currentStock}
+                    onChange={(e) => setFormData({ ...formData, currentStock: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Cost Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.costPrice}
+                    onChange={(e) => setFormData({ ...formData, costPrice: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase">Selling Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.sellingPrice}
+                    onChange={(e) => setFormData({ ...formData, sellingPrice: Number(e.target.value) })}
+                    className="w-full mt-1 px-3 py-2 border rounded-md text-sm border-slate-300 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddOpen(false)}
+                  className="px-4 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition"
+                >
+                  Create Product
                 </button>
               </div>
             </form>
